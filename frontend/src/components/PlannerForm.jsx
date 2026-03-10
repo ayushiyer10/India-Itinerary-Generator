@@ -1,0 +1,102 @@
+import { useState } from "react";
+
+const DEFAULT_PAYLOAD = {
+  title: "",
+  startDate: "",
+  endDate: "",
+  cities: "",
+  interests: "",
+  budgetInr: "",
+  pace: "balanced",
+  preferredTravelMode: "cab"
+};
+
+export function PlannerForm({ loading, onGenerate, userId }) {
+  const [form, setForm] = useState(DEFAULT_PAYLOAD);
+
+  function submit(event) {
+    event.preventDefault();
+    onGenerate({
+      ...form,
+      userId,
+      cities: form.cities.split(",").map((x) => x.trim()).filter(Boolean),
+      interests: form.interests.split(",").map((x) => x.trim()).filter(Boolean),
+      budgetInr: Number(form.budgetInr)
+    });
+  }
+
+  function setField(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  return (
+    <form onSubmit={submit} className="trip-form">
+      <label>
+        Trip Name
+        <input
+          value={form.title}
+          onChange={(e) => setField("title", e.target.value)}
+          placeholder="e.g. South India Discovery"
+          required
+        />
+      </label>
+      <label>
+        Start Date
+        <input type="date" value={form.startDate} onChange={(e) => setField("startDate", e.target.value)} required />
+      </label>
+      <label>
+        End Date
+        <input type="date" value={form.endDate} onChange={(e) => setField("endDate", e.target.value)} required />
+      </label>
+      <label>
+        City Prompt (comma separated)
+        <input
+          value={form.cities}
+          onChange={(e) => setField("cities", e.target.value)}
+          placeholder="e.g. Kochi, Munnar, Madurai"
+          required
+        />
+      </label>
+      <label>
+        Interest Prompt (comma separated)
+        <input
+          value={form.interests}
+          onChange={(e) => setField("interests", e.target.value)}
+          placeholder="e.g. heritage,food,nature,temple"
+          required
+        />
+      </label>
+      <label>
+        Budget (INR)
+        <input
+          type="number"
+          min="1000"
+          value={form.budgetInr}
+          onChange={(e) => setField("budgetInr", e.target.value)}
+          placeholder="e.g. 45000"
+          required
+        />
+      </label>
+      <label>
+        Pace
+        <select value={form.pace} onChange={(e) => setField("pace", e.target.value)}>
+          <option value="relaxed">Relaxed</option>
+          <option value="balanced">Balanced</option>
+          <option value="fast">Fast</option>
+        </select>
+      </label>
+      <label>
+        Preferred Travel Mode
+        <select value={form.preferredTravelMode} onChange={(e) => setField("preferredTravelMode", e.target.value)}>
+          <option value="cab">Cab</option>
+          <option value="metro">Metro</option>
+          <option value="train">Train</option>
+          <option value="flight">Flight</option>
+        </select>
+      </label>
+      <button disabled={loading} type="submit">
+        {loading ? "Generating..." : "Generate Itinerary"}
+      </button>
+    </form>
+  );
+}

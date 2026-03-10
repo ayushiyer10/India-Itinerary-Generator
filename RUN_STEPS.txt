@@ -1,0 +1,6 @@
+1) Terminal A - Start backend with Maven
+From project root:
+cd "C:\Users\Ayush Iyer\Desktop\Java + Cloud\backend"
+$env:DB_PASSWORD="postgres"
+& "C:\Users\Ayush Iyer\Desktop\Java + Cloud\.tools\apache-maven-3.9.9\bin\mvn.cmd" spring-boot:run
+

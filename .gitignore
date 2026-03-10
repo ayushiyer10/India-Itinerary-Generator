@@ -1,0 +1,12 @@
+.idea/
+.vscode/
+.tools/
+node_modules/
+dist/
+target/
+.env
+*.log
+frontend/.vite/
+backend/.mvn/
+frontend/release/
+frontend/electron/resources/backend/app.jar

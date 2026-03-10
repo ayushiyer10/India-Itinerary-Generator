@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🇮🇳 India AI Itinerary Planner
 
 An intelligent desktop application that automatically generates optimized travel itineraries across India.
@@ -138,11 +139,57 @@ http://localhost:8080/actuator/health
 # 💻 Frontend Setup
 
 ```
+=======
+# India AI Itinerary Planner
+
+Production-style travel planner for India with:
+
+- Java 21 + Spring Boot + JDBC (PostgreSQL)
+- React + Vite + Anime.js interactive UI
+- Free map data stack (OpenStreetMap + routing-ready design)
+- Dockerized local/dev deployment
+
+## Monorepo Layout
+
+```text
+.
+|- backend/                  # Spring Boot API + JDBC
+|- frontend/                 # React app with animations
+|- javafx-client/            # JavaFX desktop GUI client
+|- docker-compose.yml        # Optional local full-stack containers
+```
+
+## Quick Start (Local)
+
+1. Start full stack with Docker:
+```bash
+docker compose up --build
+```
+2. Open:
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8080/api`
+
+## Manual Run (Without Docker)
+
+1. Ensure PostgreSQL database exists: `india_itinerary` (default credentials: `postgres` / `postgres`)
+2. Configure env vars:
+- `DB_URL`
+- `DB_USERNAME`
+- `DB_PASSWORD`
+3. Backend:
+```bash
+cd backend
+mvn spring-boot:run
+```
+4. Frontend:
+```bash
+>>>>>>> 412c8b8 (Initial commit)
 cd frontend
 npm install
 npm run dev
 ```
 
+<<<<<<< HEAD
 Vite development server:
 
 ```
@@ -263,3 +310,17 @@ Project: AI Travel Planner Desktop Application
 # 📜 License
 
 This project is licensed under the **MIT License**.
+=======
+5. JavaFX desktop client:
+```bash
+cd javafx-client
+mvn javafx:run
+```
+
+The JavaFX client calls `http://localhost:8080/api` by default and lets you generate/view trips in a desktop GUI.
+
+## Notes
+
+- Database schema auto-creates at startup via `schema.sql` and seeds sample India places via `data.sql`.
+- AI adapter is intentionally pluggable. Current implementation is deterministic so it works without paid APIs.
+>>>>>>> 412c8b8 (Initial commit)
