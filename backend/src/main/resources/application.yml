@@ -25,3 +25,4 @@ management:
 maps:
   nominatim-url: ${NOMINATIM_URL:https://nominatim.openstreetmap.org}
   osrm-url: ${OSRM_URL:https://router.project-osrm.org}
+  external-enrichment-enabled: ${MAPS_EXTERNAL_ENRICHMENT_ENABLED:true}

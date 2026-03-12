@@ -7,6 +7,7 @@ import com.indiatravel.itinerary.dto.RegenerateDayRequest;
 import com.indiatravel.itinerary.dto.TripDetailDto;
 import com.indiatravel.itinerary.repository.ItineraryRepository;
 import com.indiatravel.itinerary.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,16 +29,21 @@ import java.util.stream.Collectors;
 
 @Service
 public class ItineraryService {
-    private static final boolean ENABLE_EXTERNAL_ENRICHMENT = false;
-
     private final ItineraryRepository itineraryRepository;
     private final UserRepository userRepository;
     private final OpenMapService openMapService;
+    private final boolean enableExternalEnrichment;
 
-    public ItineraryService(ItineraryRepository itineraryRepository, UserRepository userRepository, OpenMapService openMapService) {
+    public ItineraryService(
+            ItineraryRepository itineraryRepository,
+            UserRepository userRepository,
+            OpenMapService openMapService,
+            @Value("${maps.external-enrichment-enabled:true}") boolean enableExternalEnrichment
+    ) {
         this.itineraryRepository = itineraryRepository;
         this.userRepository = userRepository;
         this.openMapService = openMapService;
+        this.enableExternalEnrichment = enableExternalEnrichment;
     }
 
     @Transactional
@@ -407,10 +413,18 @@ public class ItineraryService {
                     .forEach(p -> byId.putIfAbsent(p.id(), p));
 
             if (byId.size() < targetSize) {
-                if (ENABLE_EXTERNAL_ENRICHMENT) {
-                    fetchAndPersistExternal(city, normalizedInterests, Math.min(targetSize - byId.size() + 4, 6));
+                if (enableExternalEnrichment) {
+                    fetchAndPersistExternal(city, normalizedInterests, Math.min(targetSize - byId.size() + 4, 6), false);
                 }
                 itineraryRepository.findPlaces(city, normalizedInterests, Math.max(targetSize + 24, 32))
+                        .stream()
+                        .filter(p -> isRelevantForAnyInterest(p, normalizedInterests, city))
+                        .forEach(p -> byId.putIfAbsent(p.id(), p));
+            }
+
+            if (enableExternalEnrichment && byId.size() < Math.min(targetSize, 4)) {
+                fetchAndPersistExternal(city, normalizedInterests, Math.max(targetSize - byId.size() + 12, 18), true);
+                itineraryRepository.findPlaces(city, normalizedInterests, Math.max(targetSize + 40, 60))
                         .stream()
                         .filter(p -> isRelevantForAnyInterest(p, normalizedInterests, city))
                         .forEach(p -> byId.putIfAbsent(p.id(), p));
@@ -428,6 +442,13 @@ public class ItineraryService {
                         .filter(p -> !isGenericPlaceName(p.name()))
                         .forEach(p -> byId.putIfAbsent(p.id(), p));
             }
+            if (byId.size() < Math.min(targetSize, 4)) {
+                seedSyntheticCityPlaces(city, normalizedInterests, Math.max(6, targetSize - byId.size() + 2));
+                itineraryRepository.findPlacesByCityWide(city, Math.max(targetSize + 30, 48))
+                        .stream()
+                        .filter(p -> !isGenericPlaceName(p.name()))
+                        .forEach(p -> byId.putIfAbsent(p.id(), p));
+            }
             return new ArrayList<>(byId.values());
         }
 
@@ -435,21 +456,68 @@ public class ItineraryService {
                 .filter(p -> !isGenericPlaceName(p.name()))
                 .forEach(p -> byId.putIfAbsent(p.id(), p));
         if (byId.size() < targetSize || byId.size() < 8) {
-            if (ENABLE_EXTERNAL_ENRICHMENT) {
-                fetchAndPersistExternal(city, List.of(), targetSize - byId.size() + 20);
+            if (enableExternalEnrichment) {
+                fetchAndPersistExternal(city, List.of(), targetSize - byId.size() + 20, byId.size() < 6);
             }
             itineraryRepository.findPlacesByCityWide(city, Math.max(targetSize + 20, 24)).stream()
+                    .filter(p -> !isGenericPlaceName(p.name()))
+                    .forEach(p -> byId.putIfAbsent(p.id(), p));
+        }
+        if (byId.size() < Math.min(targetSize, 4)) {
+            seedSyntheticCityPlaces(city, List.of("heritage", "temple", "food", "nature"), Math.max(6, targetSize - byId.size() + 2));
+            itineraryRepository.findPlacesByCityWide(city, Math.max(targetSize + 30, 48)).stream()
                     .filter(p -> !isGenericPlaceName(p.name()))
                     .forEach(p -> byId.putIfAbsent(p.id(), p));
         }
         return new ArrayList<>(byId.values());
     }
 
-    private void fetchAndPersistExternal(String city, List<String> interests, int needed) {
-        Set<String> queries = buildDynamicQueries(interests);
-        int maxQueries = interests == null || interests.isEmpty()
-                ? 3
-                : Math.min(4, Math.max(2, interests.size() + 1));
+    private void seedSyntheticCityPlaces(String city, List<String> interests, int needed) {
+        if (needed <= 0) {
+            return;
+        }
+        List<String> themes = normalizeInterests(interests);
+        if (themes.isEmpty()) {
+            themes = List.of("heritage", "temple", "food", "nature");
+        }
+        GeoPoint center = resolveCityPoint(city).orElse(new GeoPoint(20.5937, 78.9629));
+        for (int i = 0; i < needed; i++) {
+            String theme = themes.get(i % themes.size());
+            String name = switch (theme) {
+                case "temple" -> city + " Sacred Temple Circuit " + (i + 1);
+                case "food" -> city + " Local Cuisine Trail " + (i + 1);
+                case "nature" -> city + " Nature Viewpoint " + (i + 1);
+                default -> city + " Heritage Landmark " + (i + 1);
+            };
+            double offset = (i + 1) * 0.0025;
+            itineraryRepository.upsertPlace(
+                    name,
+                    city,
+                    "India",
+                    theme,
+                    center.latitude() + offset,
+                    center.longitude() + offset,
+                    estimateCostByCategory(theme, theme),
+                    90,
+                    4.1,
+                    "Curated fallback place generated for " + city + " " + theme + " itinerary coverage."
+            );
+        }
+    }
+
+    private void fetchAndPersistExternal(String city, List<String> interests, int needed, boolean aggressive) {
+        Set<String> queries = new LinkedHashSet<>(buildDynamicQueries(interests));
+        if (aggressive) {
+            queries.add("tourist attraction");
+            queries.add("top places to visit");
+            queries.add("landmark");
+            queries.add("famous places");
+            queries.add("historical place");
+        }
+        int maxQueries = aggressive
+                ? (interests == null || interests.isEmpty() ? 10 : Math.min(14, Math.max(8, interests.size() * 4)))
+                : (interests == null || interests.isEmpty() ? 3 : Math.min(4, Math.max(2, interests.size() + 1)));
+        int resultLimit = aggressive ? 12 : 6;
 
         int added = 0;
         Set<String> seenNames = new HashSet<>();
@@ -463,7 +531,7 @@ public class ItineraryService {
                 break;
             }
             try {
-                List<ExternalPlaceDto> ext = openMapService.searchPlace(q, city, 6);
+                List<ExternalPlaceDto> ext = openMapService.searchPlace(q, city, resultLimit);
                 for (ExternalPlaceDto e : ext) {
                     if (added >= needed) {
                         break;
@@ -900,8 +968,8 @@ public class ItineraryService {
             return existingPool;
         }
 
-        if (allowExternal && ENABLE_EXTERNAL_ENRICHMENT) {
-            fetchAndPersistExternal(city, List.of(theme), Math.max(desiredCount, 8));
+        if (allowExternal && enableExternalEnrichment) {
+            fetchAndPersistExternal(city, List.of(theme), Math.max(desiredCount, 8), false);
         }
         Map<Long, PlaceDto> byId = new LinkedHashMap<>();
         existingPool.forEach(place -> byId.putIfAbsent(place.id(), place));
