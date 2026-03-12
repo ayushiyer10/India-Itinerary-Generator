@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class ItineraryService {
+    private static final boolean ENABLE_EXTERNAL_ENRICHMENT = false;
 
     private final ItineraryRepository itineraryRepository;
     private final UserRepository userRepository;
@@ -72,22 +73,45 @@ public class ItineraryService {
 
         Map<String, List<PlaceDto>> cityPools = new LinkedHashMap<>();
         Map<String, Integer> cityCursor = new LinkedHashMap<>();
+        Map<String, Set<Long>> cityUsedPlaceIds = new LinkedHashMap<>();
+        Map<String, Set<String>> cityUsedPlaceNames = new LinkedHashMap<>();
+        Map<String, Integer> themeUsage = new LinkedHashMap<>();
         for (String cityKey : cityDayCounts.keySet()) {
             int requiredUnique = cityDayCounts.get(cityKey) * placeCount + 2;
             cityPools.put(cityKey, buildCityPool(cityOriginalName.get(cityKey), request.interests(), requiredUnique));
             cityCursor.put(cityKey, 0);
+            cityUsedPlaceIds.put(cityKey, new LinkedHashSet<>());
+            cityUsedPlaceNames.put(cityKey, new LinkedHashSet<>());
         }
 
         for (int i = 0; i < totalDays; i++) {
             int dayNumber = i + 1;
             String city = dayCitySequence.get(i);
-            String theme = pickTheme(request.interests(), dayNumber);
             String cityKey = normalizeCityKey(city);
             List<PlaceDto> pool = cityPools.getOrDefault(cityKey, List.of());
+            Set<Long> usedPlaceIds = cityUsedPlaceIds.computeIfAbsent(cityKey, ignored -> new LinkedHashSet<>());
+            Set<String> usedPlaceNames = cityUsedPlaceNames.computeIfAbsent(cityKey, ignored -> new LinkedHashSet<>());
+            String normalizedTheme = pickBestTheme(request.interests(), pool, usedPlaceIds, usedPlaceNames, themeUsage);
+            pool = ensureThemePool(city, pool, normalizedTheme, placeCount + 2, false);
+            cityPools.put(cityKey, pool);
             int cursor = cityCursor.getOrDefault(cityKey, 0);
-            List<PlaceDto> places = selectPlacesForTheme(pool, theme, placeCount, cursor, Set.of());
+            List<PlaceDto> places = selectPlacesForTheme(pool, normalizedTheme, placeCount, cursor, usedPlaceIds, usedPlaceNames);
+            if (places.isEmpty()) {
+                pool = ensureThemePool(city, pool, normalizedTheme, placeCount + 6, false);
+                cityPools.put(cityKey, pool);
+                places = selectPlacesForTheme(pool, normalizedTheme, placeCount, cursor, usedPlaceIds, usedPlaceNames);
+            }
+            if (places.isEmpty()) {
+                places = selectFallbackPlaces(pool, placeCount, cursor, usedPlaceIds, usedPlaceNames);
+                normalizedTheme = inferThemeFromSelectedPlaces(request.interests(), places, themeUsage);
+            }
+            places.forEach(place -> {
+                usedPlaceIds.add(place.id());
+                usedPlaceNames.add(normalizeNameKey(place.name()));
+            });
+            themeUsage.merge(normalizedTheme, 1, Integer::sum);
             cityCursor.put(cityKey, cursor + places.size());
-            createDayPlan(tripId, dayNumber, city, theme, places, request.preferredTravelMode(), dailyBudget);
+            createDayPlan(tripId, dayNumber, city, normalizedTheme, places, request.preferredTravelMode(), dailyBudget);
         }
 
         return tripId;
@@ -124,16 +148,88 @@ public class ItineraryService {
                 .flatMap(d -> d.places().stream())
                 .map(p -> p.placeId())
                 .collect(Collectors.toSet());
+        Set<String> usedNamesByOtherDays = existing.days().stream()
+                .filter(d -> d.dayNumber() != dayNumber)
+                .flatMap(d -> d.places().stream())
+                .map(p -> normalizeNameKey(p.name()))
+                .collect(Collectors.toSet());
 
         List<PlaceDto> pool = buildCityPool(city, request.interests(), requiredUnique);
-        String theme = pickTheme(request.interests(), dayNumber);
-        List<PlaceDto> places = selectPlacesForTheme(pool, theme, placeCount, Math.max(0, dayNumber - 1) * placeCount, usedByOtherDays);
+        Map<String, Integer> themeUsage = existing.days().stream()
+                .filter(d -> d.dayNumber() != dayNumber)
+                .collect(Collectors.groupingBy(d -> canonicalInterest(d.theme()), LinkedHashMap::new, Collectors.summingInt(d -> 1)));
+        String theme = pickBestTheme(request.interests(), pool, usedByOtherDays, usedNamesByOtherDays, themeUsage);
+        String normalizedTheme = canonicalInterest(theme);
+        pool = ensureThemePool(city, pool, normalizedTheme, placeCount + 4, false);
+        List<PlaceDto> places = selectPlacesForTheme(pool, theme, placeCount, Math.max(0, dayNumber - 1) * placeCount, usedByOtherDays, usedNamesByOtherDays);
+        if (places.isEmpty()) {
+            pool = ensureThemePool(city, pool, normalizedTheme, placeCount + 8, false);
+            places = selectPlacesForTheme(pool, theme, placeCount, Math.max(0, dayNumber - 1) * placeCount, usedByOtherDays, usedNamesByOtherDays);
+        }
+        if (places.isEmpty()) {
+            places = selectFallbackPlaces(pool, placeCount, Math.max(0, dayNumber - 1) * placeCount, usedByOtherDays, usedNamesByOtherDays);
+            theme = inferThemeFromSelectedPlaces(request.interests(), places, themeUsage);
+        }
         int daysCount = Math.max(existing.days().size(), 1);
         int dailyBudget = existing.budgetInr() / daysCount;
         String mode = request.preferredTravelMode() == null || request.preferredTravelMode().isBlank()
                 ? existing.preferredTravelMode() : request.preferredTravelMode();
 
         createDayPlan(tripId, dayNumber, city, theme, places, mode, dailyBudget);
+    }
+
+    private String pickBestTheme(
+            List<String> interests,
+            List<PlaceDto> pool,
+            Set<Long> blockedIds,
+            Set<String> blockedNameKeys,
+            Map<String, Integer> themeUsage
+    ) {
+        List<String> normalized = normalizeInterests(interests);
+        if (normalized.isEmpty()) {
+            return "culture";
+        }
+
+        String bestTheme = normalized.getFirst();
+        int bestScore = Integer.MIN_VALUE;
+
+        for (String theme : normalized) {
+            int available = (int) pool.stream()
+                    .filter(place -> !blockedIds.contains(place.id()))
+                    .filter(place -> !blockedNameKeys.contains(normalizeNameKey(place.name())))
+                    .filter(place -> isPlaceSuitableForTheme(place, theme))
+                    .count();
+            int usagePenalty = themeUsage.getOrDefault(theme, 0) * 3;
+            int score = available * 10 - usagePenalty;
+            if (score > bestScore) {
+                bestScore = score;
+                bestTheme = theme;
+            }
+        }
+        return bestTheme;
+    }
+
+    private String inferThemeFromSelectedPlaces(List<String> interests, List<PlaceDto> places, Map<String, Integer> themeUsage) {
+        List<String> normalized = normalizeInterests(interests);
+        if (places.isEmpty()) {
+            return normalized.isEmpty() ? "culture" : normalized.getFirst();
+        }
+        if (normalized.isEmpty()) {
+            return "culture";
+        }
+
+        String bestTheme = normalized.getFirst();
+        int bestScore = Integer.MIN_VALUE;
+        for (String theme : normalized) {
+            int matches = (int) places.stream().filter(place -> isPlaceSuitableForTheme(place, theme)).count();
+            int usagePenalty = themeUsage.getOrDefault(theme, 0) * 2;
+            int score = matches * 10 - usagePenalty;
+            if (score > bestScore) {
+                bestScore = score;
+                bestTheme = theme;
+            }
+        }
+        return bestTheme;
     }
 
     private void createDayPlan(long tripId, int dayNumber, String city, String theme, List<PlaceDto> places, String travelMode, int dailyBudget) {
@@ -311,7 +407,9 @@ public class ItineraryService {
                     .forEach(p -> byId.putIfAbsent(p.id(), p));
 
             if (byId.size() < targetSize) {
-                fetchAndPersistExternal(city, normalizedInterests, Math.min(targetSize - byId.size() + 10, 16));
+                if (ENABLE_EXTERNAL_ENRICHMENT) {
+                    fetchAndPersistExternal(city, normalizedInterests, Math.min(targetSize - byId.size() + 4, 6));
+                }
                 itineraryRepository.findPlaces(city, normalizedInterests, Math.max(targetSize + 24, 32))
                         .stream()
                         .filter(p -> isRelevantForAnyInterest(p, normalizedInterests, city))
@@ -324,6 +422,12 @@ public class ItineraryService {
                         .filter(p -> isThemeCategoryMatchForAnyInterest(p, normalizedInterests, city))
                         .forEach(p -> byId.putIfAbsent(p.id(), p));
             }
+            if (byId.isEmpty()) {
+                itineraryRepository.findPlacesByCityWide(city, Math.max(targetSize + 24, 36))
+                        .stream()
+                        .filter(p -> !isGenericPlaceName(p.name()))
+                        .forEach(p -> byId.putIfAbsent(p.id(), p));
+            }
             return new ArrayList<>(byId.values());
         }
 
@@ -331,7 +435,9 @@ public class ItineraryService {
                 .filter(p -> !isGenericPlaceName(p.name()))
                 .forEach(p -> byId.putIfAbsent(p.id(), p));
         if (byId.size() < targetSize || byId.size() < 8) {
-            fetchAndPersistExternal(city, List.of(), targetSize - byId.size() + 20);
+            if (ENABLE_EXTERNAL_ENRICHMENT) {
+                fetchAndPersistExternal(city, List.of(), targetSize - byId.size() + 20);
+            }
             itineraryRepository.findPlacesByCityWide(city, Math.max(targetSize + 20, 24)).stream()
                     .filter(p -> !isGenericPlaceName(p.name()))
                     .forEach(p -> byId.putIfAbsent(p.id(), p));
@@ -341,7 +447,9 @@ public class ItineraryService {
 
     private void fetchAndPersistExternal(String city, List<String> interests, int needed) {
         Set<String> queries = buildDynamicQueries(interests);
-        int maxQueries = interests == null || interests.isEmpty() ? 6 : 6;
+        int maxQueries = interests == null || interests.isEmpty()
+                ? 3
+                : Math.min(4, Math.max(2, interests.size() + 1));
 
         int added = 0;
         Set<String> seenNames = new HashSet<>();
@@ -355,7 +463,7 @@ public class ItineraryService {
                 break;
             }
             try {
-                List<ExternalPlaceDto> ext = openMapService.searchPlace(q, city, 10);
+                List<ExternalPlaceDto> ext = openMapService.searchPlace(q, city, 6);
                 for (ExternalPlaceDto e : ext) {
                     if (added >= needed) {
                         break;
@@ -431,20 +539,109 @@ public class ItineraryService {
                 .toList();
     }
 
-    private List<PlaceDto> selectPlacesForTheme(List<PlaceDto> pool, String theme, int count, int startCursor, Set<Long> blockedIds) {
+    private List<PlaceDto> selectPlacesForTheme(
+            List<PlaceDto> pool,
+            String theme,
+            int count,
+            int startCursor,
+            Set<Long> blockedIds,
+            Set<String> blockedNameKeys
+    ) {
         if (theme == null || theme.isBlank()) {
-            return selectSequentialPlaces(pool, count, startCursor, blockedIds);
+            return selectSequentialPlaces(pool, count, startCursor, blockedIds, blockedNameKeys);
         }
 
         List<PlaceDto> themedPool = pool.stream()
-                .filter(place -> isThemeMatch(place.category(), theme))
+                .filter(place -> isPlaceSuitableForTheme(place, theme))
+                .sorted((a, b) -> Integer.compare(scorePlaceForTheme(b, theme), scorePlaceForTheme(a, theme)))
                 .toList();
+        if (themedPool.isEmpty()) {
+            themedPool = pool.stream()
+                    .filter(place -> isThemeMatch(place.category(), theme) && !isLikelyNonAttractionName(place.name()))
+                    .sorted((a, b) -> Integer.compare(scorePlaceForTheme(b, theme), scorePlaceForTheme(a, theme)))
+                    .toList();
+        }
 
-        List<PlaceDto> selected = selectSequentialPlaces(themedPool, count, startCursor, blockedIds);
-        if (selected.size() >= count) {
-            return selected;
+        List<PlaceDto> selected = selectSequentialPlaces(themedPool, count, startCursor, blockedIds, blockedNameKeys);
+        if (selected.size() < count && !themedPool.isEmpty()) {
+            selected = topUpFromSameTheme(selected, themedPool, count);
         }
         return selected;
+    }
+
+    private boolean isPlaceSuitableForTheme(PlaceDto place, String theme) {
+        String normalizedTheme = canonicalInterest(theme);
+        String normalizedCategory = canonicalInterest(place.category());
+        String normalizedName = normalizeNameKey(place.name());
+
+        if (isLikelyNonAttractionName(normalizedName)) {
+            return false;
+        }
+
+        return switch (normalizedTheme) {
+            case "temple" -> normalizedCategory.equals("temple")
+                    || isNameConsistentWithInterest(place.name(), "temple");
+            case "heritage" -> {
+                boolean looksHeritage = normalizedCategory.equals("heritage")
+                        || isNameConsistentWithInterest(place.name(), "heritage");
+                boolean conflictingCategory = Set.of("food", "nature", "beach", "temple").contains(normalizedCategory);
+                yield looksHeritage && !conflictingCategory && !isLowQualityHeritageName(normalizedName);
+            }
+            case "food" -> normalizedCategory.equals("food")
+                    || isNameConsistentWithInterest(place.name(), "food");
+            case "nature" -> normalizedCategory.equals("nature")
+                    || normalizedCategory.equals("beach")
+                    || isNameConsistentWithInterest(place.name(), "nature");
+            default -> isStrongThemeCandidate(place, theme);
+        };
+    }
+
+    private int scorePlaceForTheme(PlaceDto place, String theme) {
+        String normalizedTheme = canonicalInterest(theme);
+        String normalizedCategory = canonicalInterest(place.category());
+        String normalizedName = normalizeNameKey(place.name());
+
+        int score = 0;
+        if (normalizedCategory.equals(normalizedTheme)) {
+            score += 10;
+        }
+        if (isNameConsistentWithInterest(place.name(), normalizedTheme)) {
+            score += 8;
+        }
+        score += Math.max(0, (int) Math.round(place.rating() * 2));
+
+        if (normalizedTheme.equals("heritage")) {
+            if (containsAny(normalizedName, "fort", "museum", "monument", "palace", "memorial", "archaeological")) {
+                score += 6;
+            }
+            if (isLowQualityHeritageName(normalizedName)) {
+                score -= 15;
+            }
+        }
+        if (normalizedTheme.equals("temple") && containsAny(normalizedName, "temple", "mandir", "kovil", "amman", "swamy", "perumal")) {
+            score += 5;
+        }
+        return score;
+    }
+
+    private List<PlaceDto> topUpFromSameTheme(List<PlaceDto> current, List<PlaceDto> themePool, int targetCount) {
+        Map<Long, PlaceDto> byId = new LinkedHashMap<>();
+        Set<String> seenNames = new LinkedHashSet<>();
+        current.forEach(place -> {
+            byId.putIfAbsent(place.id(), place);
+            seenNames.add(normalizeNameKey(place.name()));
+        });
+
+        for (PlaceDto place : themePool) {
+            if (byId.size() >= targetCount) {
+                break;
+            }
+            String nameKey = normalizeNameKey(place.name());
+            if (seenNames.add(nameKey)) {
+                byId.putIfAbsent(place.id(), place);
+            }
+        }
+        return new ArrayList<>(byId.values());
     }
 
     private boolean isThemeMatch(String category, String theme) {
@@ -455,7 +652,7 @@ public class ItineraryService {
                 || normalizedTheme.contains(normalizedCategory);
     }
 
-    private List<PlaceDto> selectSequentialPlaces(List<PlaceDto> pool, int count, int startCursor, Set<Long> blockedIds) {
+    private List<PlaceDto> selectSequentialPlaces(List<PlaceDto> pool, int count, int startCursor, Set<Long> blockedIds, Set<String> blockedNameKeys) {
         if (pool.isEmpty()) {
             return List.of();
         }
@@ -469,6 +666,9 @@ public class ItineraryService {
                 continue;
             }
             String nameKey = normalizeNameKey(candidate.name());
+            if (blockedNameKeys.contains(nameKey)) {
+                continue;
+            }
             if (seen.add(candidate.id()) && seenNames.add(nameKey)) {
                 selected.add(candidate);
             }
@@ -479,6 +679,9 @@ public class ItineraryService {
                     break;
                 }
                 String nameKey = normalizeNameKey(place.name());
+                if (blockedNameKeys.contains(nameKey)) {
+                    continue;
+                }
                 if (seen.add(place.id()) && seenNames.add(nameKey)) {
                     selected.add(place);
                 }
@@ -487,9 +690,37 @@ public class ItineraryService {
         return selected;
     }
 
+    private List<PlaceDto> selectFallbackPlaces(
+            List<PlaceDto> pool,
+            int count,
+            int startCursor,
+            Set<Long> blockedIds,
+            Set<String> blockedNameKeys
+    ) {
+        List<PlaceDto> safePool = pool.stream()
+                .filter(place -> !isLikelyNonAttractionName(place.name()))
+                .toList();
+        List<PlaceDto> selected = selectSequentialPlaces(safePool, count, startCursor, blockedIds, blockedNameKeys);
+        if (!selected.isEmpty()) {
+            return selected;
+        }
+        selected = selectSequentialPlaces(safePool, count, startCursor, Set.of(), Set.of());
+        if (!selected.isEmpty()) {
+            return selected;
+        }
+        return selectSequentialPlaces(pool, count, startCursor, Set.of(), Set.of());
+    }
+
     private String normalizeCategory(String type, String query) {
         String base = (type == null ? "" : type.toLowerCase(Locale.ROOT));
-        if (base.contains("museum") || base.contains("monument") || base.contains("fort")) {
+        if (base.contains("museum")
+                || base.contains("monument")
+                || base.contains("fort")
+                || base.contains("palace")
+                || base.contains("castle")
+                || base.contains("memorial")
+                || base.contains("ruins")
+                || base.contains("archaeological")) {
             return "heritage";
         }
         if (base.contains("temple") || base.contains("mosque") || base.contains("church")) {
@@ -643,6 +874,49 @@ public class ItineraryService {
         };
     }
 
+    private boolean isStrongThemeCandidate(PlaceDto place, String theme) {
+        String normalizedTheme = canonicalInterest(theme);
+        String name = normalizeNameKey(place.name());
+        if (isLikelyNonAttractionName(name)) {
+            return false;
+        }
+        boolean categoryMatches = isThemeMatch(place.category(), normalizedTheme);
+        boolean nameMatches = isNameConsistentWithInterest(place.name(), normalizedTheme);
+        return switch (normalizedTheme) {
+            case "temple" -> nameMatches && (categoryMatches || containsAny(name, "temple", "mandir", "kovil", "shrine"));
+            case "heritage" -> (categoryMatches || nameMatches) && !containsAny(name, "hotel", "restaurant", "street", "road", "market");
+            case "food" -> nameMatches && (categoryMatches || containsAny(name, "restaurant", "cafe", "eatery", "dhaba", "mess"));
+            case "nature" -> categoryMatches || nameMatches;
+            default -> categoryMatches || nameMatches;
+        };
+    }
+
+    private List<PlaceDto> ensureThemePool(String city, List<PlaceDto> existingPool, String theme, int desiredCount, boolean allowExternal) {
+        if (theme == null || theme.isBlank()) {
+            return existingPool;
+        }
+        long matching = existingPool.stream().filter(place -> isPlaceSuitableForTheme(place, theme)).count();
+        if (matching >= desiredCount) {
+            return existingPool;
+        }
+
+        if (allowExternal && ENABLE_EXTERNAL_ENRICHMENT) {
+            fetchAndPersistExternal(city, List.of(theme), Math.max(desiredCount, 8));
+        }
+        Map<Long, PlaceDto> byId = new LinkedHashMap<>();
+        existingPool.forEach(place -> byId.putIfAbsent(place.id(), place));
+        itineraryRepository.findPlaces(city, List.of(canonicalInterest(theme)), Math.max(desiredCount * 5, 30))
+                .stream()
+                .filter(place -> isPlaceSuitableForTheme(place, theme))
+                .forEach(place -> byId.putIfAbsent(place.id(), place));
+        itineraryRepository.findPlacesByCityWide(city, Math.max(desiredCount * 6, 40))
+                .stream()
+                .filter(place -> isPlaceSuitableForTheme(place, theme))
+                .forEach(place -> byId.putIfAbsent(place.id(), place));
+
+        return new ArrayList<>(byId.values());
+    }
+
     private boolean containsAny(String text, String... words) {
         if (text == null || text.isBlank()) {
             return false;
@@ -654,6 +928,23 @@ public class ItineraryService {
             }
         }
         return false;
+    }
+
+    private boolean isLikelyNonAttractionName(String name) {
+        String normalized = normalizeNameKey(name);
+        return containsAny(normalized,
+                "police station", "railway station", "bus stand", "bus station", "post office",
+                "street", "main street", "road", "junction", "cross", "market road",
+                "hospital", "clinic", "school", "college", "office", "department",
+                "nagar", "ward", "district office", "collectorate",
+                "entry ticket", "entry tickets", "ticket counter", "ticket office",
+                "booking office", "service road", "mobile palace");
+    }
+
+    private boolean isLowQualityHeritageName(String normalizedName) {
+        return containsAny(normalizedName,
+                "dream house", "new mobile", "residency", "apartment", "villa", "bungalow")
+                || normalizedName.matches(".*\\b(19|20)\\d{2}\\b.*");
     }
 
     private String normalizeNameKey(String value) {

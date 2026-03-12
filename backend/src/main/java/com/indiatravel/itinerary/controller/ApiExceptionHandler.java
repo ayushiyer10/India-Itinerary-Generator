@@ -46,6 +46,9 @@ public class ApiExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Map<String, String> handleGeneric(Exception ex) {
-        return Map.of("error", "Unexpected server error");
+        String message = ex.getMessage() == null || ex.getMessage().isBlank()
+                ? "Unexpected server error"
+                : ex.getMessage();
+        return Map.of("error", message);
     }
 }

@@ -31,7 +31,13 @@ export function PlannerPage({ user, onLogout }) {
       const fullTrip = await getTrip(create.tripId);
       setTrip(fullTrip);
     } catch (err) {
-      setError(err?.response?.data?.error || "Failed to generate trip");
+      if (err?.code === "ECONNABORTED") {
+        setError("Trip generation timed out. Please try fewer cities or a shorter date range.");
+      } else if (!err?.response) {
+        setError(`Network/server error: ${err?.message || "Unable to reach backend"}`);
+      } else {
+        setError(err?.response?.data?.error || "Failed to generate trip");
+      }
     } finally {
       setLoading(false);
     }

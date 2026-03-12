@@ -14,13 +14,25 @@ const DEFAULT_PAYLOAD = {
 export function PlannerForm({ loading, onGenerate, userId }) {
   const [form, setForm] = useState(DEFAULT_PAYLOAD);
 
+  function parsePromptList(value, options = {}) {
+    const { allowDotSeparator = false } = options;
+    let normalized = value.replace(/\r/g, "\n");
+    if (allowDotSeparator) {
+      normalized = normalized.replace(/\s+\.\s+/g, ",");
+    }
+    return normalized
+      .split(/[,\n;|]+/)
+      .map((item) => item.trim().replace(/\.$/, ""))
+      .filter(Boolean);
+  }
+
   function submit(event) {
     event.preventDefault();
     onGenerate({
       ...form,
       userId,
-      cities: form.cities.split(",").map((x) => x.trim()).filter(Boolean),
-      interests: form.interests.split(",").map((x) => x.trim()).filter(Boolean),
+      cities: parsePromptList(form.cities, { allowDotSeparator: true }),
+      interests: parsePromptList(form.interests),
       budgetInr: Number(form.budgetInr)
     });
   }

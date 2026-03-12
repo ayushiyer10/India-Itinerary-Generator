@@ -44,7 +44,7 @@ public class OpenMapService {
 
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .header("User-Agent", "india-itinerary-planner/1.0")
-                .timeout(Duration.ofSeconds(4))
+                .timeout(Duration.ofSeconds(2))
                 .GET()
                 .build();
 
