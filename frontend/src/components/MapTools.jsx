@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { estimateRoute, searchMapPlaces } from "../api/client";
-import { ReactBitsHoverText } from "./ReactBitsHoverText";
 
 export function MapTools() {
   const [city, setCity] = useState("");
@@ -35,7 +34,7 @@ export function MapTools() {
 
   return (
     <div className="map-tools">
-      <h2><ReactBitsHoverText text="Free Map API Tools" /></h2>
+      <h2>Free Map API Tools</h2>
       <div className="tool-row">
         <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search term" />
@@ -50,8 +49,8 @@ export function MapTools() {
       <ul className="ext-results">
         {results.map((item) => (
           <li key={`${item.displayName}-${item.latitude}`}>
-            <strong><ReactBitsHoverText text={item.type} /></strong>
-            <span><ReactBitsHoverText text={item.displayName} /></span>
+            <strong>{item.type}</strong>
+            <span>{item.displayName}</span>
           </li>
         ))}
       </ul>

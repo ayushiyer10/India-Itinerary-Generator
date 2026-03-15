@@ -13,7 +13,6 @@ export function ReactBitsHoverText({ text, as = "span", className = "" }) {
     anime({
       targets,
       translateY: [0, -6],
-      color: ["#0b2139", "#00a7ff"],
       textShadow: ["0 0 0 rgba(0,0,0,0)", "0 0 10px rgba(0, 174, 255, 0.55)"],
       delay: anime.stagger(18),
       duration: 280,
@@ -28,7 +27,6 @@ export function ReactBitsHoverText({ text, as = "span", className = "" }) {
     anime({
       targets,
       translateY: 0,
-      color: "#0b2139",
       textShadow: "0 0 0 rgba(0,0,0,0)",
       delay: anime.stagger(10),
       duration: 220,

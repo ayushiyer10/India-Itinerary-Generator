@@ -2,12 +2,15 @@
   "name": "india-itinerary-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "India AI Itinerary Planner Desktop App",
+  "description": "India Itinerary Planner Desktop App",
   "author": "Ayush Iyer",
   "main": "electron/main.cjs",
   "type": "module",
 
   "scripts": {
+    "kill:desktop": "taskkill /F /IM \"India Itinerary Planner.exe\" >nul 2>&1 || echo Desktop app not running",
+    "kill:electron": "taskkill /F /IM electron.exe >nul 2>&1 || echo Electron not running",
+    "clean:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path release) { Remove-Item -Recurse -Force release }\"",
     "dev": "vite",
     "build": "vite build",
     "electron": "electron .",
@@ -18,7 +21,7 @@
 
     "copy:jar": "if not exist electron\\resources\\backend mkdir electron\\resources\\backend && copy ..\\backend\\target\\itinerary-backend-0.0.1-SNAPSHOT.jar electron\\resources\\backend\\app.jar",
 
-    "dist": "npm run kill-java && npm run build && npm run backend:jar && npm run copy:jar && electron-builder"
+    "dist": "npm run kill:desktop && npm run kill:electron && npm run clean:desktop && npm run kill-java && npm run build && npm run backend:jar && npm run copy:jar && electron-builder"
   },
 
   "dependencies": {
@@ -40,7 +43,7 @@
 
   "build": {
     "appId": "com.indiatravel.desktop",
-    "productName": "India AI Itinerary Planner",
+    "productName": "India Itinerary Planner",
 
     "directories": {
       "output": "release"

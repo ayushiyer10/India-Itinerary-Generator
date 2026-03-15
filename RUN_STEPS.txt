@@ -4,17 +4,10 @@ cd "C:\Users\Ayush Iyer\Desktop\Java + Cloud\backend"
 $env:DB_PASSWORD="postgres"
 & "C:\Users\Ayush Iyer\Desktop\Java + Cloud\.tools\apache-maven-3.9.9\bin\mvn.cmd" spring-boot:run
 
-RUN / STOP HOSTING 
+Frontend (dev):
+cd "C:\Users\Ayush Iyer\Desktop\Java + Cloud\frontend"
+npm.cmd run dev
 
-CLOUD (AZURE)
-Frontend:
-https://lemon-pebble-02250eb00.4.azurestaticapps.net
-
-Backend health:
-https://itinerary-backend.wittysea-e985aedd.centralindia.azurecontainerapps.io/actuator/health
-
-Stop cloud backend:
-Azure Portal -> Container App (itinerary-backend) -> Stop
-
-Start cloud backend:
-Azure Portal -> Container App (itinerary-backend) -> Start
+Build Desktop EXE (local backend embedded):
+cd "C:\Users\Ayush Iyer\Desktop\Java + Cloud\frontend"
+npm.cmd run dist

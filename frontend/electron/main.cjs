@@ -4,6 +4,8 @@ const fs = require("fs");
 const http = require("http");
 const { spawn } = require("child_process");
 
+app.commandLine.appendSwitch("disable-http-cache");
+
 let mainWindow = null;
 let backendProcess = null;
 
@@ -108,7 +110,7 @@ function createWindow() {
     width: 1440,
     height: 900,
     autoHideMenuBar: true,
-    title: "India AI Itinerary Planner",
+    title: "India Itinerary Planner",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false
@@ -116,7 +118,8 @@ function createWindow() {
   });
 
   const indexPath = path.join(__dirname, "..", "dist", "index.html");
-  mainWindow.loadFile(indexPath);
+  mainWindow.webContents.session.clearCache()
+    .finally(() => mainWindow.loadFile(indexPath));
 }
 
 app.whenReady().then(async () => {

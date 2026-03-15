@@ -25,4 +25,6 @@ management:
 maps:
   nominatim-url: ${NOMINATIM_URL:https://nominatim.openstreetmap.org}
   osrm-url: ${OSRM_URL:https://router.project-osrm.org}
+  geoapify-url: ${GEOAPIFY_URL:https://api.geoapify.com}
+  geoapify-api-key: ${GEOAPIFY_API_KEY:}
   external-enrichment-enabled: ${MAPS_EXTERNAL_ENRICHMENT_ENABLED:true}

@@ -14,7 +14,6 @@ public record GenerateTripRequest(
         @NotNull LocalDate startDate,
         @NotNull LocalDate endDate,
         @NotEmpty List<String> cities,
-        @NotEmpty List<String> interests,
         @Min(1000) int budgetInr,
         @NotBlank String pace,
         @NotBlank String preferredTravelMode

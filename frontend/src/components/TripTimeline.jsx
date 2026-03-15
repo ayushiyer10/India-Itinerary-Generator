@@ -4,12 +4,14 @@ import { ReactBitsHoverText } from "./ReactBitsHoverText";
 
 export function TripTimeline({ trip, loading, onRegenerateDay }) {
   useEffect(() => {
+    if (!trip) return;
     anime({
-      targets: ".day-card",
+      targets: ".day-card li",
       opacity: [0, 1],
-      translateX: [20, 0],
+      translateX: [18, 0],
       easing: "easeOutCubic",
-      delay: anime.stagger(100)
+      delay: anime.stagger(42),
+      duration: 420
     });
   }, [trip]);
 
@@ -30,7 +32,7 @@ export function TripTimeline({ trip, loading, onRegenerateDay }) {
               </div>
               <button
                 disabled={loading}
-                onClick={() => onRegenerateDay(day.dayNumber, [day.theme], trip.preferredTravelMode)}
+                onClick={() => onRegenerateDay(day.dayNumber, trip.preferredTravelMode)}
               >
                 Regenerate
               </button>

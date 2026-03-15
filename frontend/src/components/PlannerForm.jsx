@@ -5,7 +5,6 @@ const DEFAULT_PAYLOAD = {
   startDate: "",
   endDate: "",
   cities: "",
-  interests: "",
   budgetInr: "",
   pace: "balanced",
   preferredTravelMode: "cab"
@@ -32,7 +31,6 @@ export function PlannerForm({ loading, onGenerate, userId }) {
       ...form,
       userId,
       cities: parsePromptList(form.cities, { allowDotSeparator: true }),
-      interests: parsePromptList(form.interests),
       budgetInr: Number(form.budgetInr)
     });
   }
@@ -43,7 +41,7 @@ export function PlannerForm({ loading, onGenerate, userId }) {
 
   return (
     <form onSubmit={submit} className="trip-form">
-      <label>
+      <label className="full-row">
         Trip Name
         <input
           value={form.title}
@@ -60,21 +58,12 @@ export function PlannerForm({ loading, onGenerate, userId }) {
         End Date
         <input type="date" value={form.endDate} onChange={(e) => setField("endDate", e.target.value)} required />
       </label>
-      <label>
+      <label className="full-row">
         City Prompt (comma separated)
         <input
           value={form.cities}
           onChange={(e) => setField("cities", e.target.value)}
           placeholder="e.g. Kochi, Munnar, Madurai"
-          required
-        />
-      </label>
-      <label>
-        Interest Prompt (comma separated)
-        <input
-          value={form.interests}
-          onChange={(e) => setField("interests", e.target.value)}
-          placeholder="e.g. heritage,food,nature,temple"
           required
         />
       </label>
@@ -89,7 +78,7 @@ export function PlannerForm({ loading, onGenerate, userId }) {
           required
         />
       </label>
-      <label>
+      <label className="dropdown-row">
         Pace
         <select value={form.pace} onChange={(e) => setField("pace", e.target.value)}>
           <option value="relaxed">Relaxed</option>
@@ -97,7 +86,7 @@ export function PlannerForm({ loading, onGenerate, userId }) {
           <option value="fast">Fast</option>
         </select>
       </label>
-      <label>
+      <label className="dropdown-row full-row">
         Preferred Travel Mode
         <select value={form.preferredTravelMode} onChange={(e) => setField("preferredTravelMode", e.target.value)}>
           <option value="cab">Cab</option>
@@ -106,7 +95,7 @@ export function PlannerForm({ loading, onGenerate, userId }) {
           <option value="flight">Flight</option>
         </select>
       </label>
-      <button disabled={loading} type="submit">
+      <button className="submit-row" disabled={loading} type="submit">
         {loading ? "Generating..." : "Generate Itinerary"}
       </button>
     </form>
